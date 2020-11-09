@@ -1,0 +1,6 @@
+build/*
+.vscode
+filter/*
+news.txt
+data/*
+.DS_Store

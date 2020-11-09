@@ -1,0 +1,1 @@
+DHCPD_OPTS="-S"

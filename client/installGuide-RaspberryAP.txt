@@ -1,0 +1,38 @@
+apt-get update
+apt-get install hostapd udhcpd
+systemctl unmask hostapd
+systemctl enable hostapd
+
+# Backup existing files
+cp /etc/udhcpd.conf /etc/udhcpd.conf.old
+cp /etc/default/udhcpd /etc/default/udhcpd.old
+cp /etc/network/interfaces /etc/network/interfaces.old
+cp /etc/hostapd/hostapd.conf /etc/hostapd/hostapd.conf.old
+cp /etc/default/hostapd /etc/default/hostapd.old
+cp /etc/sysctl.conf /etc/sysctl.conf.old
+cp /etc/iptables.ipv4.nat /etc/iptables.ipv4.nat.old
+
+# Configuring OpenDNS
+cp ./config-files/udhcpd_opendns.conf /etc/udhcpd.conf
+
+# Enable udhcpd
+cp ./config-files/udhcpd /etc/default
+
+# Enable hostapd with conf
+cp ./config-files/hostapd.conf /etc/hostapd
+
+# Configure NAT
+cp ./config-files/sysctl.conf /etc
+
+touch /var/lib/misc/udhcpd.leases
+
+# Init access point
+service hostapd start
+update-rc.d hostapd enable
+
+# Init DHCP server
+service udhcpd start
+update-rc.d udhcpd enable
+
+sleep 5
+reboot
