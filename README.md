@@ -54,147 +54,212 @@ The design structure is shown below.
 
 1. Install WireGuard on the VPN server
 
+   ```sh
+   add-apt-repository ppa:wireguard/wireguard
+   apt-get update
+   apt-get install wireguard-dkms wireguard-tools linux-headers-$(uname -r)
+   ```
+
+2. Generate server and client keys
+
+   ```sh
+   Umask 077
+   wg genkey | tee server_private_key | wg pubkey > server_public_key
+   wg genkey | tee client_private_key | wg pubkey > client_public_key
+   ```
+
+3. Generate server config
+
+   ```sh
+   cp ./server/wg0.conf /etc/wireguard/wg0.conf
+   ```
+
+   Edit the lines with keys in _/etc/wireguard/wg0.conf_
+
+   ```
+   PrivateKey = <insert server_private_key>
+   PublicKey = <insert client_public_key>
+   ```
+
+4. Generate client config
+
+   ```sh
+   cp ./server/wg0-client.conf /etc/wireguard/wg0-client.conf
+   ```
+
+   Edit the lines with keys in _/etc/wireguard/wg0-client.conf_
+
+   ```
+   PrivateKey = <insert server_private_key>
+   PublicKey = <insert client_public_key>
+   ```
+
+5. Enable the WireGuard interface on the server.
+
+   ```sh
+   chown -v root:root /etc/wireguard/wg0.conf
+   chmod -v 600 /etc/wireguard/wg0.conf
+   wg-quick up wg0
+
+   # Enable the interface at boot
+   systemctl enable wg-quick@wg0.service
+   ```
+
+6. Enable IP forwarding on the server
+
+   Edit the file _/etc/sysctl.conf_ and set the following line as:
+
+   ```
+   net.ipv4.ip_forward=1
+   ```
+
+   Then also do the following to stop having to reboot the server
+
+   ```sh
+   sysctl -p
+   echo 1 > /proc/sys/net/ipv4/ip_forward
+   ```
+
+7. Configure firewall rules on the server
+
+   Track VPN connection
+
+   ```sh
+   iptables -A INPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+   iptables -A FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+   ```
+
+   Allow incoming VPN traffic on the listening port
+
+   ```sh
+   iptables -A INPUT -p udp -m udp --dport 51820 -m conntrack --ctstate NEW -j ACCEPT
+   ```
+
+   Allow both TCP and UDP recursive DNS traffic
+
+   ```sh
+   iptables -A INPUT -s 10.200.200.0/24 -p tcp -m tcp --dport 53 -m conntrack --ctstate NEW -j ACCEPT
+   iptables -A INPUT -s 10.200.200.0/24 -p udp -m udp --dport 53 -m conntrack --ctstate NEW -j ACCEPT
+   ```
+
+   Allow forwarding of packets that stay in the VPN tunnel
+
+   ```sh
+   iptables -A FORWARD -i wg0 -o wg0 -m conntrack --ctstate NEW -j ACCEPT
+   ```
+
+   Setup NAT
+
+   ```sh
+   iptables -t nat -A POSTROUTING -s 10.200.200.0/24 -o eth0 -j MASQUERADE
+   ```
+
+   Save rules
+
+   ```sh
+   apt-get install iptables-persistent
+   systemctl enable netfilter-persistent
+   netfilter-persistent save
+   ```
+
+8. Configure DNS
+
+   ```sh
+   apt-get install unbound unbound-host
+   curl -o /var/lib/unbound/root.hints https://www.internic.net/domain/named.cache
+   ```
+
+   Copy unbound.conf from server
+
+   ```sh
+   cp ./server/unbound.conf /etc/unbound/unbound.conf
+   ```
+
+   Enable DNS resolver
+
+   ```sh
+   chown -R unbound:unbound /var/lib/unbound
+   systemctl enable unbound
+   ```
+
+### 4.2. Client Access Point Configuration
+
+1. Install hostapd and udhcpd
+
+   ```sh
+   apt-get update
+   apt-get install hostapd udhcpd
+   systemctl unmask hostapd
+   systemctl enable hostapd
+   ```
+
+2. Backup existing files
+
+   ```
+   cp /etc/udhcpd.conf /etc/udhcpd.conf.old
+   cp /etc/default/udhcpd /etc/default/udhcpd.old
+   cp /etc/network/interfaces /etc/network/interfaces.old
+   cp /etc/hostapd/hostapd.conf /etc/hostapd/hostapd.conf.old
+   cp /etc/default/hostapd /etc/default/hostapd.old
+   cp /etc/sysctl.conf /etc/sysctl.conf.old
+   cp /etc/iptables.ipv4.nat /etc/iptables.ipv4.nat.old
+   ```
+
+3. Copy OpenDNS conf
+
+   ```
+   cp ./client/udhcpd_opendns.conf /etc/udhcpd.conf
+   ```
+
+4. Copy udhcpd conf
+
+   ```sh
+   cp ./client/udhcpd /etc/default
+   ```
+
+5. Copy hostapd conf
+
+   ```sh
+   cp ./client/hostapd.conf /etc/hostapd
+   ```
+
+6. Copy NAT conf
+
+   ```sh
+   cp ./client/sysctl.conf /etc
+   touch /var/lib/misc/udhcpd.leases
+   ```
+
+7. Initialize Access Point
+
+   ```sh
+   service hostapd start
+   update-rc.d hostapd enable
+   ```
+
+8. Initialize DHCP server
+
+   ```sh
+   service udhcpd start
+   update-rc.d udhcpd enable
+
+   sleep 5
+   reboot
+   ```
+
+### 4.3. Client WireGuard Configuration
+
+1. Set up Wireguard on clients
     ```sh
     add-apt-repository ppa:wireguard/wireguard
     apt-get update
     apt-get install wireguard-dkms wireguard-tools linux-headers-$(uname -r)
     ```
 
-2. Generate server and client keys
-
+2. Copy wg-client.con from server
     ```sh
-    Umask 077
-    wg genkey | tee server_private_key | wg pubkey > server_public_key
-    wg genkey | tee client_private_key | wg pubkey > client_public_key
+    wg-quick up wg0-client
     ```
-
-3. Generate server config
-
-    ```sh
-    cp ./server/wg0.conf /etc/wireguard/wg0.conf
-    ```
-
-    Edit the lines with keys in _/etc/wireguard/wg0.conf_
-
-    ```
-    PrivateKey = <insert server_private_key>
-    PublicKey = <insert client_public_key>
-    ```
-
-4. Generate client config
-
-    ```sh
-    cp ./server/wg0-client.conf /etc/wireguard/wg0-client.conf
-    ```
-
-    Edit the lines with keys in _/etc/wireguard/wg0-client.conf_
-
-    ```
-    PrivateKey = <insert server_private_key>
-    PublicKey = <insert client_public_key>
-    ```
-
-5. Enable the WireGuard interface on the server.
-
-    ```sh
-    chown -v root:root /etc/wireguard/wg0.conf
-    chmod -v 600 /etc/wireguard/wg0.conf
-    wg-quick up wg0
-
-    # Enable the interface at boot
-    systemctl enable wg-quick@wg0.service
-    ```
-
-6. Enable IP forwarding on the server
-
-    Edit the file _/etc/sysctl.conf_ and set the following line as:
-
-    ```
-    net.ipv4.ip_forward=1
-    ```
-
-    Then also do the following to stop having to reboot the server
-
-    ```sh
-    sysctl -p
-    echo 1 > /proc/sys/net/ipv4/ip_forward
-    ```
-
-7. Configure firewall rules on the server
-
-    Track VPN connection
-
-    ```sh
-    iptables -A INPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
-    iptables -A FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
-    ```
-
-    Allow incoming VPN traffic on the listening port
-
-    ```sh
-    iptables -A INPUT -p udp -m udp --dport 51820 -m conntrack --ctstate NEW -j ACCEPT
-    ```
-
-    Allow both TCP and UDP recursive DNS traffic
-
-    ```sh
-    iptables -A INPUT -s 10.200.200.0/24 -p tcp -m tcp --dport 53 -m conntrack --ctstate NEW -j ACCEPT
-    iptables -A INPUT -s 10.200.200.0/24 -p udp -m udp --dport 53 -m conntrack --ctstate NEW -j ACCEPT
-    ```
-
-    Allow forwarding of packets that stay in the VPN tunnel
-
-    ```sh
-    iptables -A FORWARD -i wg0 -o wg0 -m conntrack --ctstate NEW -j ACCEPT
-    ```
-
-    Setup NAT
-
-    ```sh
-    iptables -t nat -A POSTROUTING -s 10.200.200.0/24 -o eth0 -j MASQUERADE
-    ```
-
-    Save rules
-
-    ```sh
-    apt-get install iptables-persistent
-    systemctl enable netfilter-persistent
-    netfilter-persistent save
-    ```
-
-8. Configure DNS
-
-    ```sh
-    apt-get install unbound unbound-host
-    curl -o /var/lib/unbound/root.hints https://www.internic.net/domain/named.cache
-    ```
-
-    Copy unbound.conf from server
-
-    ```sh
-    cp ./server/unbound.conf /etc/unbound/unbound.conf
-    ```
-
-    Enable DNS resolver
-
-    ```sh
-    chown -R unbound:unbound /var/lib/unbound
-    systemctl enable unbound
-    ```
-
-### 4.2. Client Configurations
-
-1. Install hostapd, udhcpd.
-2. Backup existing configs.
-3. Configure DNS.
-4. Enable udhcpd.
-5. Enable hostapd.
-6. Configure NAT.
-7. Initialize Access Point.
-8. Initialize DHCP Server.
-9. Install WireGuard.
-   10.Copy WireGuard configuration from the server.
-   11.Enable WireGuard with configurations.
 
 ## 5. Verification
 
@@ -208,6 +273,3 @@ The design structure is shown below.
 
 - As further work, the Remote server may connect the internet over The Onion Routing (TOR) to improve anonymity.
 
-```
-
-```

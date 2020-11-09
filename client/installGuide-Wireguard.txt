@@ -1,7 +1,0 @@
-# 8. Set up Wireguard on clients
-add-apt-repository ppa:wireguard/wireguard
-apt-get update
-apt-get install wireguard-dkms wireguard-tools linux-headers-$(uname -r)
-
-# Copy wg-client.con from server
-wg-quick up wg0-client
